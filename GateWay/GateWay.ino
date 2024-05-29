@@ -20,19 +20,16 @@ PubSubClient client_sub(espClient1);
 PubSubClient client_pub(espClient2);
 
 // Hàm callback để xử lý yêu cầu CoAP từ client
-void callback_coap_ldr(CoapPacket &packet, IPAddress ip, int port) {
-  Serial.println("[Coap Request received]");
-
+void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
   // Lấy payload từ gói tin
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
   p[packet.payloadlen] = NULL;
-  Serial.print("LDR Value: ");
-  Serial.println(p);
-
-  String P = "{ldr:" + String(p) + "}";
-  client_pub.publish("v1/devices/me/telemetry", P.c_str());
-  Serial.println("Published data to Thingsboard: " + P);
+  
+  Serial.print("Message CoAP arrived: ");
+  Serial.println(String(p));
+  client_pub.publish("v1/devices/me/telemetry", String(p).c_str());
+  Serial.println("Published data to Thingsboard: " + String(p));
   // Gửi phản hồi cho client (nếu cần thiết)
   coap.sendResponse(ip, port, packet.messageid, "OK");
 }
@@ -44,7 +41,7 @@ void callback_pub(char* topic, byte* payload, unsigned int length) {
 // Hàm callback để xử lý dữ liệu gửi về từ sensor bằng MQTT
 void callback_sub(char* topic, byte* payload, unsigned int length) {
   String data;
-  Serial.print("Message arrived [");
+  Serial.print("Message MQTT arrived [");
   Serial.print(topic);
   Serial.print("] : ");
   for(int i = 0; i < length; i++) {
@@ -116,7 +113,7 @@ void setup() {
   client_sub.setCallback(callback_sub);
   client_pub.setServer(thingsboard_server, 1883);
   client_pub.setCallback(callback_pub);
-  coap.server(callback_coap_ldr, "ldr");
+  coap.server(callback_coap, "coap");
   coap.start(7000);
 }
 
