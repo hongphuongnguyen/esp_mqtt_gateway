@@ -1,0 +1,8 @@
+services:
+ mqtt:
+    image: "eclipse-mosquitto"
+    ports:
+      - "1884:1884"
+      - "9002:9002"
+    volumes: 
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf

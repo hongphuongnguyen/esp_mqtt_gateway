@@ -7,8 +7,8 @@
 #define ssid "Kien"
 #define pass "abcde123"
 
-#define mqtt_server         "192.168.1.12"
-#define thingsboard_server  "192.168.1.12"
+#define mqtt_server         "192.168.1.7"
+#define thingsboard_server  "192.168.1.7"
 
 #define coap_server         "192.168.1.6"
 
@@ -97,7 +97,7 @@ void thingsboard_callback(char* topic, byte* payload, unsigned int length) {
 
     if(data.indexOf(":") != -1){
       idx = data.indexOf(":");
-      strcpy(tmp_controler.type, data.substring(0, idx - 1).c_str());
+      strcpy(tmp_controler.type, data.substring(1, idx).c_str());
       tmp_controler.set_point = data.substring(idx+1).toFloat();
       xQueueSend(ctrl_queue, &tmp_controler, 0);
     }
@@ -157,22 +157,29 @@ void mosquitto_callback(char * topic, byte* payload, unsigned int length){
 void control_task( void *arg){
   char pub_topic[40];
   String data;
+  memset((void *)pub_topic, 0, 40);
+  strcat(pub_topic, ROOM_ID);
+  strcat(pub_topic, MOSQUITTO_TOPIC_PUB);
   while(1){
     while(xQueueReceive(ctrl_queue, &tmp_controler, 0)){
-      data += String(tmp_controler.type) + ":" + String(tmp_controler.set_point, 1);
+      data = String(tmp_controler.type) + ":" + String(tmp_controler.set_point, 1);
+      Serial.println("Controlling...");
       if(String(tmp_controler.type) == "\"temp\""){
         stored_data.temp.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(strcat(pub_topic, MOSQUITTO_TOPIC_PUB), data.c_str(), (bool)true);
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
       }
-      else if(String(tmp_controler.type) == "\"humi\""){
+      else if(String(tmp_controler.type) == "\"humidity\""){
+        Serial.println(data);
         stored_data.humi.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(strcat(pub_topic, MOSQUITTO_TOPIC_PUB), data.c_str(), (bool)true);
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+
       }
       else if(String(tmp_controler.type) == "\"air\""){
         stored_data.air.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(strcat(pub_topic, MOSQUITTO_TOPIC_PUB), data.c_str(), (bool)true);
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
       }
       else if(String(tmp_controler.type)== "\"light\""){
+        Serial.println(data);
         stored_data.light.set_point = tmp_controler.set_point;
         light_coap.put(coap_server, 5683, "light", String(tmp_controler.set_point, 0).c_str());
       }
