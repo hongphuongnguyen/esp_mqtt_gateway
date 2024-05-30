@@ -10,6 +10,12 @@
 #define thingsboard_server  "mqtt.thingsboard.cloud"
 #define accessToken         "e6apOql9bEc1Wh4MDpCK"
 
+#define THINGSBOARD_TOPIC_SUB "v1/devices/me/attributes"
+#define THINGSBOARD_TOPIC_PUB "v1/devices/me/telemetry"
+
+#define MOSQUITTO_TOPIC_RES "/response"
+#define MOSQUITTO_TOPIC_PUB "/actuator/HVAC"
+
 typedef struct {
   char type[12];
   bool status;
@@ -39,11 +45,34 @@ typedef struct {
 WiFiUDP udp;
 Coap coap(udp);
 
+WiFiUDP light_udp;
+Coap light_coap(light_udp);
+
 WiFiClient espClient1;
 WiFiClient espClient2;
 
 PubSubClient client_sub(espClient1);
 PubSubClient client_pub(espClient2);
+
+QueueHandle_t ctrl_queue;
+
+Controller_t tmp_controler = {
+  .type = "temp"
+};
+
+Gateway_element_t stored_data = {
+  .room_id = 1
+};
+
+void coap_light_response(CoapPacket &packet, IPAddress ip, int port){
+    Serial.println("[Coap Response got]");
+  
+    char p[packet.payloadlen + 1];
+    memcpy(p, packet.payload, packet.payloadlen);
+    p[packet.payloadlen] = NULL;
+    
+    Serial.println(p);
+}
 
 // Hàm callback để xử lý yêu cầu CoAP từ client
 void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
@@ -62,6 +91,31 @@ void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
 
 // Hàm callback để xử lý dữ liệu gửi về từ Thingsboard bằng MQTT
 void callback_pub(char* topic, byte* payload, unsigned int length) {
+  String data;
+  int idx = 0;
+  
+
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] : ");
+  for(int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+    data += (char)payload[i];
+  }
+  Serial.println("");
+  delay(2000);
+  // callback nhan tin hieu dieu khien tu thingsboard va publish tin hieu dieu khien ve HVAC
+  if(String(topic) == THINGSBOARD_TOPIC_SUB){
+    Serial.print("Message form Thingsboard: ");
+    Serial.println(data);
+
+    if(data.indexOf(":") != -1){
+      idx = data.indexOf(":");
+      strcpy(tmp_controler.type, data.substring(1, idx).c_str());
+      tmp_controler.set_point = data.substring(idx+1).toFloat();
+      xQueueSend(ctrl_queue, &tmp_controler, 0);
+    }
+  }
 }
 
 // Hàm callback để xử lý dữ liệu gửi về từ sensor bằng MQTT
@@ -78,6 +132,73 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
   Serial.println("");
   client_pub.publish("v1/devices/me/telemetry", data.c_str(), false);
   Serial.println("Published data to Thingsboard: " + data);
+
+  if (String(topic) == "sensor/DHT11") {
+
+    client_mosquitto.publish(THINGSBOARD_TOPIC_PUB, data.c_str());
+    delay(2000);
+    Serial.println("Published data to Thingsboard: " + payload);
+  }
+  String topic_response = String(ROOM_ID) + String(MOSQUITTO_TOPIC_RES);
+
+  // callback kich hoat khi co phan hoi tu HVAC ve ket qua sau khi thu thi
+  
+  if(String(topic) == topic_response){
+    if(data.indexOf("HVAC") != -1){
+      if(data.indexOf("disconnected") != -1){
+        //can publish trang thai mat ket noi cho thingsboard
+        Serial.println("HVAC Disconnected");
+        client_thingsboard.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": false}");
+        stored_data.hvac.status = 0;
+      }
+      else if(data.indexOf("OK") != -1){
+        //cap nhat set point luu o gateway
+      }
+      else if(data.indexOf("Connected") != -1){
+        //cap nhat set point luu o gateway
+        Serial.println("HVAC connected");
+        client_thingsboard.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": true}");
+        stored_data.hvac.status = 1;
+      }
+      else{
+        // luu loi chua duoc xu ly
+      }
+    }
+  }
+}
+
+void control_task( void *arg){
+  char pub_topic[40];
+  String data;
+  memset((void *)pub_topic, 0, 40);
+  strcat(pub_topic, ROOM_ID);
+  strcat(pub_topic, MOSQUITTO_TOPIC_PUB);
+  while(1){
+    while(xQueueReceive(ctrl_queue, &tmp_controler, 0)){
+      data = String(tmp_controler.type) + ":" + String(tmp_controler.set_point, 1);
+      Serial.println("Controlling...");
+      if(String(tmp_controler.type) == "\"temp\""){
+        stored_data.temp.set_point = tmp_controler.set_point;
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+      }
+      else if(String(tmp_controler.type) == "\"humidity\""){
+        Serial.println(data);
+        stored_data.humi.set_point = tmp_controler.set_point;
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+
+      }
+      else if(String(tmp_controler.type) == "\"air\""){
+        stored_data.air.set_point = tmp_controler.set_point;
+        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+      }
+      else if(String(tmp_controler.type)== "\"light\""){
+        Serial.println(data);
+        stored_data.light.set_point = tmp_controler.set_point;
+        light_coap.put(coap_server, 5683, "light", String(tmp_controler.set_point, 0).c_str());
+      }
+    }
+    vTaskDelay(100/portTICK_PERIOD_MS);
+  }
 }
 
 void setup_wifi() {
@@ -140,7 +261,14 @@ void setup() {
   client_pub.setServer(thingsboard_server, 1883);
   client_pub.setCallback(callback_pub);
   coap.server(callback_coap, "coap");
-  coap.start(7000);
+  coap.start();
+
+  ctrl_queue = xQueueCreate(3, sizeof(Controller_t));
+
+  light_coap.response(coap_light_response);
+  light_coap.start();
+
+  xTaskCreatePinnedToCore(control_task, "hvac task", 2048, NULL, 1, NULL, 1);
 }
 
 void loop() {
@@ -150,5 +278,6 @@ void loop() {
   client_sub.loop();
   client_pub.loop();
   coap.loop();
+  light_coap.loop();
   delay(3000);
 }
