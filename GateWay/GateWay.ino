@@ -10,6 +10,32 @@
 #define thingsboard_server  "mqtt.thingsboard.cloud"
 #define accessToken         "e6apOql9bEc1Wh4MDpCK"
 
+typedef struct {
+  char type[12];
+  bool status;
+  float set_point;
+}__attribute__((packed))  Controller_t;
+
+typedef struct {
+  float high;
+  float low;
+}__attribute__((packed)) Threshole_t;
+
+typedef struct {
+  Threshole_t threshole;
+  float sensing;
+  float set_point;
+}__attribute__((packed)) Environ_element_t;
+
+typedef struct {
+  uint8_t room_id;
+  Controller_t hvac;
+  Controller_t light;
+  Environ_element_t temp;
+  Environ_element_t humi;
+  Environ_element_t air;
+}__attribute__((packed)) Gateway_element_t;
+
 WiFiUDP udp;
 Coap coap(udp);
 
