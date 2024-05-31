@@ -3,18 +3,22 @@
 #include <PubSubClient.h>
 #include <coap-simple.h>
 
-#define mqtt_server "192.168.1.6"
-#define ssid        "Phuong Huyen" 
-#define pass        "123456789"
+#define mqtt_server "192.168.1.5"
+#define ssid        "Kien" 
+#define pass        "abcde123"
 
-#define thingsboard_server  "mqtt.thingsboard.cloud"
-#define accessToken         "e6apOql9bEc1Wh4MDpCK"
+#define thingsboard_server  "192.168.1.5"
+#define accessToken         "PD3S3LMavuogQB7AV8EY"
+
+#define coap_server   "192.168.1.10"
 
 #define THINGSBOARD_TOPIC_SUB "v1/devices/me/attributes"
 #define THINGSBOARD_TOPIC_PUB "v1/devices/me/telemetry"
 
 #define MOSQUITTO_TOPIC_RES "/response"
 #define MOSQUITTO_TOPIC_PUB "/actuator/HVAC"
+
+#define ROOM_ID   "room1"
 
 typedef struct {
   char type[12];
@@ -74,7 +78,7 @@ void coap_light_response(CoapPacket &packet, IPAddress ip, int port){
     Serial.println(p);
 }
 
-// Hàm callback để xử lý yêu cầu CoAP từ client
+// Hàm callback để xử lý yêu cầu CoAP từ client cuar Coap server
 void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
   // Lấy payload từ gói tin
   char p[packet.payloadlen + 1];
@@ -83,7 +87,7 @@ void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
   
   Serial.print("Message CoAP arrived: ");
   Serial.println(String(p));
-  client_pub.publish("v1/devices/me/telemetry", String(p).c_str());
+  client_pub.publish(THINGSBOARD_TOPIC_PUB, String(p).c_str());
   Serial.println("Published data to Thingsboard: " + String(p));
   // Gửi phản hồi cho client (nếu cần thiết)
   coap.sendResponse(ip, port, packet.messageid, "OK");
@@ -130,14 +134,14 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
   }
   data += "\0";
   Serial.println("");
-  client_pub.publish("v1/devices/me/telemetry", data.c_str(), false);
-  Serial.println("Published data to Thingsboard: " + data);
+  // client_pub.publish("v1/devices/me/telemetry", data.c_str(), false);
+  // Serial.println("Published data to Thingsboard: " + data);
 
   if (String(topic) == "sensor/DHT11") {
 
-    client_mosquitto.publish(THINGSBOARD_TOPIC_PUB, data.c_str());
+    client_pub.publish(THINGSBOARD_TOPIC_PUB, data.c_str());
     delay(2000);
-    Serial.println("Published data to Thingsboard: " + payload);
+    Serial.println("Published data to Thingsboard: " + data);
   }
   String topic_response = String(ROOM_ID) + String(MOSQUITTO_TOPIC_RES);
 
@@ -148,7 +152,7 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
       if(data.indexOf("disconnected") != -1){
         //can publish trang thai mat ket noi cho thingsboard
         Serial.println("HVAC Disconnected");
-        client_thingsboard.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": false}");
+        client_pub.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": false}");
         stored_data.hvac.status = 0;
       }
       else if(data.indexOf("OK") != -1){
@@ -157,7 +161,7 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
       else if(data.indexOf("Connected") != -1){
         //cap nhat set point luu o gateway
         Serial.println("HVAC connected");
-        client_thingsboard.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": true}");
+        client_pub.publish(THINGSBOARD_TOPIC_PUB, "{\"status\": true}");
         stored_data.hvac.status = 1;
       }
       else{
@@ -179,17 +183,17 @@ void control_task( void *arg){
       Serial.println("Controlling...");
       if(String(tmp_controler.type) == "\"temp\""){
         stored_data.temp.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+        client_sub.publish(pub_topic, data.c_str(), (bool)false);
       }
       else if(String(tmp_controler.type) == "\"humidity\""){
         Serial.println(data);
         stored_data.humi.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+        client_sub.publish(pub_topic, data.c_str(), (bool)false);
 
       }
       else if(String(tmp_controler.type) == "\"air\""){
         stored_data.air.set_point = tmp_controler.set_point;
-        client_mosquitto.publish(pub_topic, data.c_str(), (bool)false);
+        client_sub.publish(pub_topic, data.c_str(), (bool)false);
       }
       else if(String(tmp_controler.type)== "\"light\""){
         Serial.println(data);
@@ -223,6 +227,7 @@ void connectToThingsboard(){
     while(!client_pub.connect("ESP32Gateway", accessToken, NULL)) {
       Serial.println("Failed to connect to Thingsboard!");
       Serial.println("Retrying...");
+      client_pub.subscribe(THINGSBOARD_TOPIC_SUB, 1);
       delay(5000);
     }
     Serial.println("Connected to Thingsboard!");
@@ -230,6 +235,9 @@ void connectToThingsboard(){
 }
 
 void connectToMosquitto(){
+  
+  String topic_response = String(ROOM_ID) + String(MOSQUITTO_TOPIC_RES);
+
   if(!client_sub.connected()){
     Serial.println("Connecting to Mosquitto Broker...");
     while(!client_sub.connect("ESP32Gateway")) {
@@ -238,8 +246,12 @@ void connectToMosquitto(){
       delay(5000);
     }
     Serial.println("Connected to Mosquitto Broker!");
-    client_sub.subscribe("sensor/DHT11");
-    Serial.println("Subcribed to topic sensor/DHT11");
+    if(client_sub.subscribe("room1/sensor/DHT11")){
+      Serial.println("Subcribed to topic sensor/DHT11");
+    }
+    if(client_sub.subscribe(topic_response.c_str(),1)){
+      Serial.println("Subcribed to topic: " + topic_response);
+    }
   }
 }
 
@@ -256,7 +268,7 @@ void setup() {
 
   Serial.begin(115200);
   setup_wifi();
-  client_sub.setServer(mqtt_server, 1885);
+  client_sub.setServer(mqtt_server, 1884);
   client_sub.setCallback(callback_sub);
   client_pub.setServer(thingsboard_server, 1883);
   client_pub.setCallback(callback_pub);
@@ -279,5 +291,5 @@ void loop() {
   client_pub.loop();
   coap.loop();
   light_coap.loop();
-  delay(3000);
+  vTaskDelay(3000/portTICK_PERIOD_MS);
 }
