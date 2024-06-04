@@ -3,14 +3,14 @@
 #include <PubSubClient.h>
 #include <coap-simple.h>
 
-#define mqtt_server "192.168.1.5"
-#define ssid        "Kien" 
+#define mqtt_server "192.168.137.1"
+#define ssid        "cien" 
 #define pass        "abcde123"
 
-#define thingsboard_server  "192.168.1.5"
-#define accessToken         "PD3S3LMavuogQB7AV8EY"
+#define thingsboard_server  "demo.thingsboard.io"
+#define accessToken         "0LTEuJcbNcp4TYH74NnY"
 
-#define coap_server   "192.168.1.10"
+#define coap_server   "192.168.137.100"
 
 #define THINGSBOARD_TOPIC_SUB "v1/devices/me/attributes"
 #define THINGSBOARD_TOPIC_PUB "v1/devices/me/telemetry"
@@ -44,6 +44,7 @@ typedef struct {
   Environ_element_t temp;
   Environ_element_t humi;
   Environ_element_t air;
+  Environ_element_t lumi;
 }__attribute__((packed)) Gateway_element_t;
 
 WiFiUDP udp;
@@ -87,6 +88,7 @@ void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
   
   Serial.print("Message CoAP arrived: ");
   Serial.println(String(p));
+  stored_data.lumi.sensing = String(p).toFloat();
   client_pub.publish(THINGSBOARD_TOPIC_PUB, String(p).c_str());
   Serial.println("Published data to Thingsboard: " + String(p));
   // Gửi phản hồi cho client (nếu cần thiết)
@@ -197,8 +199,8 @@ void control_task( void *arg){
       }
       else if(String(tmp_controler.type)== "\"light\""){
         Serial.println(data);
-        stored_data.light.set_point = tmp_controler.set_point;
-        light_coap.put(coap_server, 5683, "light", String(tmp_controler.set_point, 0).c_str());
+        stored_data.lumi.set_point = tmp_controler.set_point - stored_data.lumi.sensing;
+        light_coap.put(coap_server, 5683, "light", String(stored_data.lumi.set_point, 0).c_str());
       }
     }
     vTaskDelay(100/portTICK_PERIOD_MS);
@@ -227,10 +229,10 @@ void connectToThingsboard(){
     while(!client_pub.connect("ESP32Gateway", accessToken, NULL)) {
       Serial.println("Failed to connect to Thingsboard!");
       Serial.println("Retrying...");
-      client_pub.subscribe(THINGSBOARD_TOPIC_SUB, 1);
       delay(5000);
     }
     Serial.println("Connected to Thingsboard!");
+    client_pub.subscribe(THINGSBOARD_TOPIC_SUB, 1);
   }
 }
 
@@ -291,5 +293,5 @@ void loop() {
   client_pub.loop();
   coap.loop();
   light_coap.loop();
-  vTaskDelay(3000/portTICK_PERIOD_MS);
+  vTaskDelay(100/portTICK_PERIOD_MS);
 }
