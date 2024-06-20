@@ -4,10 +4,10 @@
 #include <coap-simple.h>
 
 #define mqtt_server "192.168.137.1"
-#define ssid        "cien" 
+#define ssid        "hongphuong" 
 #define pass        "abcde123"
 
-#define thingsboard_server  "192.168.137.1"
+#define thingsboard_server  "thingsboard.hust-2slab.org"
 #define accessToken         "PD3S3LMavuogQB7AV8EY"
 
 #define coap_server   "192.168.137.100"
@@ -204,7 +204,6 @@ void control_task( void *arg){
       else if(String(tmp_controler.type)== "\"light\""){
         Serial.println(data);
         stored_data.lumi.set_point = tmp_controler.set_point - stored_data.lumi.sensing;
-        if()
         light_coap.put(coap_server, 5683, "light", String(stored_data.lumi.set_point, 0).c_str());
       }
     }
