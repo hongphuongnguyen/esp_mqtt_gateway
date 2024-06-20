@@ -7,8 +7,8 @@
 #define ssid        "cien" 
 #define pass        "abcde123"
 
-#define thingsboard_server  "demo.thingsboard.io"
-#define accessToken         "0LTEuJcbNcp4TYH74NnY"
+#define thingsboard_server  "192.168.137.1"
+#define accessToken         "PD3S3LMavuogQB7AV8EY"
 
 #define coap_server   "192.168.137.100"
 
@@ -59,6 +59,12 @@ WiFiClient espClient2;
 PubSubClient client_sub(espClient1);
 PubSubClient client_pub(espClient2);
 
+IPAddress local_IP(192,168,137,30);
+IPAddress gateway(192,168,137, 1);
+IPAddress subnet(255,255,255,1);
+IPAddress primaryDNS(8,8,8,8);
+IPAddress secondaryDNS(4,4,4,4);
+
 QueueHandle_t ctrl_queue;
 
 Controller_t tmp_controler = {
@@ -92,7 +98,7 @@ void callback_coap(CoapPacket &packet, IPAddress ip, int port) {
   client_pub.publish(THINGSBOARD_TOPIC_PUB, String(p).c_str());
   Serial.println("Published data to Thingsboard: " + String(p));
   // Gửi phản hồi cho client (nếu cần thiết)
-  coap.sendResponse(ip, port, packet.messageid, "OK");
+  coap.sendResponse(ip, port, packet.messageid, "OK\0", strlen("OK\0"));
 }
 
 // Hàm callback để xử lý dữ liệu gửi về từ Thingsboard bằng MQTT
@@ -136,8 +142,6 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
   }
   data += "\0";
   Serial.println("");
-  // client_pub.publish("v1/devices/me/telemetry", data.c_str(), false);
-  // Serial.println("Published data to Thingsboard: " + data);
 
   if (String(topic) == "sensor/DHT11") {
 
@@ -174,7 +178,7 @@ void callback_sub(char* topic, byte* payload, unsigned int length) {
 }
 
 void control_task( void *arg){
-  char pub_topic[40];
+  char pub_topic[40] = "";
   String data;
   memset((void *)pub_topic, 0, 40);
   strcat(pub_topic, ROOM_ID);
@@ -200,6 +204,7 @@ void control_task( void *arg){
       else if(String(tmp_controler.type)== "\"light\""){
         Serial.println(data);
         stored_data.lumi.set_point = tmp_controler.set_point - stored_data.lumi.sensing;
+        if()
         light_coap.put(coap_server, 5683, "light", String(stored_data.lumi.set_point, 0).c_str());
       }
     }
@@ -212,6 +217,7 @@ void setup_wifi() {
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
+  WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS);
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -248,7 +254,7 @@ void connectToMosquitto(){
       delay(5000);
     }
     Serial.println("Connected to Mosquitto Broker!");
-    if(client_sub.subscribe("room1/sensor/DHT11")){
+    if(client_sub.subscribe("sensor/DHT11")){
       Serial.println("Subcribed to topic sensor/DHT11");
     }
     if(client_sub.subscribe(topic_response.c_str(),1)){
@@ -275,7 +281,7 @@ void setup() {
   client_pub.setServer(thingsboard_server, 1883);
   client_pub.setCallback(callback_pub);
   coap.server(callback_coap, "coap");
-  coap.start();
+  coap.start(5685);
 
   ctrl_queue = xQueueCreate(3, sizeof(Controller_t));
 
